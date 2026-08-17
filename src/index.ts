@@ -1,4 +1,5 @@
 const ANILIST_URL = "https://graphql.anilist.co";
+const ANILIST_PAGE = "https://anilist.co/anime/";
 const ANIKOTO_URL = "https://anikototv.to";
 
 const CORS = {
@@ -55,16 +56,87 @@ function titleVariants(media: any) {
     media?.title?.userPreferred, ...(media?.synonyms || [])].filter(Boolean).map(String);
 }
 
+function stripHtml(s: string) {
+  return s.replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function anilistFromPage(id: number) {
+  const pageUrl = `${ANILIST_PAGE}${id}/`;
+  const r = await fetch(pageUrl, {
+    headers: {
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+    },
+    redirect: "follow",
+  });
+  if (!r.ok) throw new Error(`AniList page HTTP ${r.status}`);
+
+  const html = await r.text();
+  const finalUrl = r.url || pageUrl;
+  const title = stripHtml(
+    html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
+    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ||
+    html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || ""
+  ).replace(/\s*[·|]\s*AniList.*$/i, "").trim();
+
+  if (!title) throw new Error("AniList page did not expose an anime title");
+
+  const text = stripHtml(html);
+  const episodes = Number(text.match(/\bEpisodes\s+(\d+)\b/i)?.[1] || 0) || null;
+  const seasonYear = Number(text.match(/\bSeason\s+[^\d]{0,30}(\d{4})\b/i)?.[1] || 0) || null;
+  const format = /\bFormat\s+TV\b/i.test(text) ? "TV" : /\bFormat\s+Movie\b/i.test(text) ? "MOVIE" : null;
+
+  const pathTitle = finalUrl.match(/\/anime\/\d+\/([^/?#]+)/i)?.[1] || "";
+  const decodedPathTitle = decodeURIComponent(pathTitle).replace(/[-_]+/g, " ").trim();
+  const variants = [...new Set([title, decodedPathTitle].filter(Boolean))];
+
+  return {
+    id,
+    idMal: null,
+    format,
+    episodes,
+    seasonYear,
+    title: {
+      romaji: variants[0] || null,
+      english: variants[0] || null,
+      native: null,
+      userPreferred: variants[0] || null,
+    },
+    synonyms: variants.slice(1),
+    _source: "anilist-page-fallback",
+  };
+}
+
 async function anilist(id: number) {
   const r = await fetch(ANILIST_URL, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "Mozilla/5.0 (compatible; Fetcher/1.0)",
+    },
     body: JSON.stringify({ query: ANILIST_QUERY, variables: { id } }),
   });
-  if (!r.ok) throw new Error(`AniList HTTP ${r.status}`);
-  const body: any = await r.json();
-  if (body.errors?.length) throw new Error(body.errors[0].message || "AniList error");
-  return body.data?.Media || null;
+
+  if (r.ok) {
+    const body: any = await r.json();
+    if (body.errors?.length) throw new Error(body.errors[0].message || "AniList error");
+    return body.data?.Media || null;
+  }
+
+  // AniList can temporarily return HTTP 403 when its public GraphQL API is
+  // disabled or an upstream IP is blocked. Public anime pages can still be
+  // available, so use the page as a metadata fallback instead of killing the
+  // resolver completely.
+  if (r.status === 403 || r.status === 429 || r.status >= 500) {
+    try { return await anilistFromPage(id); } catch {}
+  }
+
+  throw new Error(`AniList HTTP ${r.status}`);
 }
 
 function resolveUrl(value: string, base: string) {
@@ -77,8 +149,6 @@ function cleanHtml(s: string) {
     .replace(/&nbsp;/g, " ").trim();
 }
 
-/* Handles the current Anikoto search markup and is deliberately tolerant of
-   attribute/class ordering changes. */
 function parseAnikoto(html: string) {
   const out: any[] = [];
   const itemBlocks = html.match(/<a\b[^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*>[\s\S]*?<\/a>/gi) || [];
@@ -163,7 +233,7 @@ async function resolveByAniList(id: number) {
 
   return json({
     ok: !!match,
-    anilist: { id: media.id, idMal: media.idMal, format: media.format, episodes: media.episodes, seasonYear: media.seasonYear, title: media.title, synonyms: media.synonyms },
+    anilist: { id: media.id, idMal: media.idMal, format: media.format, episodes: media.episodes, seasonYear: media.seasonYear, title: media.title, synonyms: media.synonyms, source: media._source || "graphql" },
     match,
     alternatives: ranked.slice(0, 10),
     searched: searchTerms,
