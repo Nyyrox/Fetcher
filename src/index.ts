@@ -93,14 +93,13 @@ function parseAnikoto(html: string) {
     const jp = cleanHtml(dataJp);
     const type = cleanHtml(block.match(/<span[^>]*class=["'][^"']*\bdot\b[^"']*["'][^>]*>\s*([^<]+?)\s*<\/span>/i)?.[1] || "");
     const scoreMatch = block.match(/<span[^>]*class=["'][^"']*\bdot\b[^"']*["'][^>]*>[\s\S]*?([0-9]+(?:\.[0-9]+)?)[\s\S]*?<\/span>/i);
-    const yearMatch = block.match(/(?:year|release)[^>]*>([^<]{4})</i);
+    const yearMatch = block.match(/(?:year|release)[^>]*>\s*(\d{4})\s*<\//i);
     out.push({ url, slug: slugFromUrl(url), jp, title, type, score: scoreMatch ? Number(scoreMatch[1]) : null, year: yearMatch?.[1] || null });
   }
   return out.filter(x => x.slug);
 }
 
 async function anikotoSearch(keyword: string) {
-  // The AJAX endpoint is used first because it is the site's native search.
   const ajax = new URL("/ajax/anime/search", ANIKOTO_URL);
   ajax.searchParams.set("keyword", keyword);
   const headers = {
@@ -118,8 +117,6 @@ async function anikotoSearch(keyword: string) {
     }
   } catch {}
 
-  // Fallback: normal filter search. This makes the resolver survive changes to
-  // the site's autocomplete/AJAX implementation.
   const page = new URL("/filter/", ANIKOTO_URL);
   page.searchParams.set("keyword", keyword);
   const r = await fetch(page, { headers: { "User-Agent": headers["User-Agent"], Accept: "text/html,*/*" } });
@@ -148,8 +145,6 @@ async function resolveByAniList(id: number) {
   if (!media) return json({ ok: false, error: "AniList anime not found" }, 404);
 
   const variants = titleVariants(media);
-  // Search every useful title, not only the longest one. This handles titles
-  // such as Re:Zero where Anikoto may index a shortened/alternate title.
   const searchTerms = [...new Set(variants)].sort((a, b) => b.length - a.length).slice(0, 8);
   const all = new Map<string, any>();
   for (const term of searchTerms) {
@@ -256,7 +251,7 @@ export default {
       if (url.pathname === "/resolve") {
         const id = Number(url.searchParams.get("anilist"));
         if (!Number.isInteger(id) || id <= 0) return json({ ok: false, error: "Use ?anilist=<AniList ID>" }, 400);
-        return resolveByAniList(id);
+        return await resolveByAniList(id);
       }
       if (url.pathname === "/search") {
         const keyword = url.searchParams.get("keyword")?.trim();
@@ -267,11 +262,11 @@ export default {
       if (url.pathname === "/inspect") {
         const raw = url.searchParams.get("url");
         if (!raw) return json({ ok: false, error: "Missing ?url=" }, 400);
-        return inspectPage(validateTarget(raw), request);
+        return await inspectPage(validateTarget(raw), request);
       }
       if (url.pathname === "/fetch" || url.pathname === "/proxy" || url.searchParams.has("url")) {
         if (!url.searchParams.has("url")) return json({ ok: false, error: "Missing ?url=" }, 400);
-        return universalFetch(url, request);
+        return await universalFetch(url, request);
       }
       return json({ ok: true, service: "Fetcher + AniList → Anikoto resolver", endpoints: {
         resolve: "/resolve?anilist=<id>", search: "/search?keyword=<title>", inspect: "/inspect?url=<url>",
