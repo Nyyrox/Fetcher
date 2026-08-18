@@ -1,22 +1,11 @@
 const ANILIST_URL = "https://graphql.anilist.co";
-const ANILIST_PAGE = "https://anilist.co/anime/";
 const ANIKOTO_URL = "https://anikototv.to";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
   "Access-Control-Allow-Headers": "*",
-  "Access-Control-Expose-Headers": "*",
 };
-
-const ANILIST_QUERY = `
-query ($id: Int!) {
-  Media(id: $id, type: ANIME) {
-    id idMal format episodes seasonYear
-    title { romaji english native userPreferred }
-    synonyms
-  }
-}`;
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -25,19 +14,16 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function normalize(value: unknown) {
-  return String(value || "")
+function normalize(v: unknown) {
+  return String(v ?? "")
     .toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/&/g, " and ").replace(/[^\p{L}\p{N}]+/gu, " ")
     .replace(/\b(the|a|an)\b/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function tokens(value: unknown) {
-  return new Set(normalize(value).split(" ").filter(x => x.length > 1));
-}
-
 function tokenScore(a: string, b: string) {
-  const A = tokens(a), B = tokens(b);
+  const A = new Set(normalize(a).split(" ").filter(x => x.length > 1));
+  const B = new Set(normalize(b).split(" ").filter(x => x.length > 1));
   if (!A.size || !B.size) return 0;
   let common = 0;
   for (const x of A) if (B.has(x)) common++;
@@ -45,305 +31,282 @@ function tokenScore(a: string, b: string) {
 }
 
 function slugFromUrl(url: string) {
-  try {
-    const p = new URL(url).pathname;
-    return p.match(/^\/watch\/([^/]+)/i)?.[1] || null;
-  } catch { return null; }
+  try { return new URL(url).pathname.match(/^\/watch\/([^/]+)/i)?.[1] || null; }
+  catch { return null; }
 }
 
-function titleVariants(media: any) {
-  return [media?.title?.english, media?.title?.romaji, media?.title?.native,
-    media?.title?.userPreferred, ...(media?.synonyms || [])].filter(Boolean).map(String);
-}
-
-function stripHtml(s: string) {
-  return s.replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
-}
-
-async function anilistFromPage(id: number) {
-  const pageUrl = `${ANILIST_PAGE}${id}/`;
-  const r = await fetch(pageUrl, {
-    headers: {
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-    },
-    redirect: "follow",
-  });
-  if (!r.ok) throw new Error(`AniList page HTTP ${r.status}`);
-
-  const html = await r.text();
-  const finalUrl = r.url || pageUrl;
-  const title = stripHtml(
-    html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
-    html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ||
-    html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] || ""
-  ).replace(/\s*[·|]\s*AniList.*$/i, "").trim();
-
-  if (!title) throw new Error("AniList page did not expose an anime title");
-
-  const text = stripHtml(html);
-  const episodes = Number(text.match(/\bEpisodes\s+(\d+)\b/i)?.[1] || 0) || null;
-  const seasonYear = Number(text.match(/\bSeason\s+[^\d]{0,30}(\d{4})\b/i)?.[1] || 0) || null;
-  const format = /\bFormat\s+TV\b/i.test(text) ? "TV" : /\bFormat\s+Movie\b/i.test(text) ? "MOVIE" : null;
-
-  const pathTitle = finalUrl.match(/\/anime\/\d+\/([^/?#]+)/i)?.[1] || "";
-  const decodedPathTitle = decodeURIComponent(pathTitle).replace(/[-_]+/g, " ").trim();
-  const variants = [...new Set([title, decodedPathTitle].filter(Boolean))];
-
-  return {
-    id,
-    idMal: null,
-    format,
-    episodes,
-    seasonYear,
-    title: {
-      romaji: variants[0] || null,
-      english: variants[0] || null,
-      native: null,
-      userPreferred: variants[0] || null,
-    },
-    synonyms: variants.slice(1),
-    _source: "anilist-page-fallback",
-  };
-}
-
-async function anilist(id: number) {
-  const r = await fetch(ANILIST_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      accept: "application/json",
-      "user-agent": "Mozilla/5.0 (compatible; Fetcher/1.0)",
-    },
-    body: JSON.stringify({ query: ANILIST_QUERY, variables: { id } }),
-  });
-
-  if (r.ok) {
-    const body: any = await r.json();
-    if (body.errors?.length) throw new Error(body.errors[0].message || "AniList error");
-    return body.data?.Media || null;
-  }
-
-  // AniList can temporarily return HTTP 403 when its public GraphQL API is
-  // disabled or an upstream IP is blocked. Public anime pages can still be
-  // available, so use the page as a metadata fallback instead of killing the
-  // resolver completely.
-  if (r.status === 403 || r.status === 429 || r.status >= 500) {
-    try { return await anilistFromPage(id); } catch {}
-  }
-
-  throw new Error(`AniList HTTP ${r.status}`);
-}
-
-function resolveUrl(value: string, base: string) {
+function abs(value: string, base = ANIKOTO_URL) {
   try { return new URL(value, base).toString(); } catch { return null; }
 }
 
-function cleanHtml(s: string) {
-  return s.replace(/<[^>]*>/g, "")
+function decodeText(s: string) {
+  return s.replace(/<[^>]*>/g, " ")
     .replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, " ").trim();
+    .replace(/&nbsp;/g, " ").replace(/&#x27;/gi, "'")
+    .replace(/\s+/g, " ").trim();
+}
+
+function titleVariants(m: any) {
+  const t = m?.title || {};
+  const syn = Array.isArray(m?.synonyms) ? m.synonyms : [];
+  return [...new Set([t.english, t.romaji, t.native, t.userPreferred, ...syn]
+    .filter(Boolean).map(String))];
+}
+
+function makeMetadata(input: any) {
+  const titles = [input.title, input.name, input.english, input.romaji, input.native,
+    ...(Array.isArray(input.synonyms) ? input.synonyms : String(input.synonyms || "").split(","))]
+    .filter(Boolean).map(String);
+  const uniq = [...new Set(titles)];
+  return {
+    id: input.anilist ? Number(input.anilist) || null : input.id ? Number(input.id) || null : null,
+    idMal: input.idMal ? Number(input.idMal) || null : input.mal ? Number(input.mal) || null : null,
+    format: input.format ? String(input.format).toUpperCase() : null,
+    episodes: input.episodes ? Number(input.episodes) || null : null,
+    seasonYear: input.seasonYear ? Number(input.seasonYear) || null : input.year ? Number(input.year) || null : null,
+    title: {
+      english: input.english || input.title || input.name || null,
+      romaji: input.romaji || input.title || input.name || null,
+      native: input.native || null,
+      userPreferred: input.userPreferred || input.title || input.name || null,
+    },
+    synonyms: uniq,
+  };
+}
+
+async function getAniListMetadata(id: number) {
+  const query = `query ($id:Int!){ Media(id:$id,type:ANIME){ id idMal format episodes seasonYear title{romaji english native userPreferred} synonyms } }`;
+  const r = await fetch(ANILIST_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ query, variables: { id } }),
+  });
+  if (!r.ok) throw new Error(`AniList HTTP ${r.status}`);
+  const b: any = await r.json();
+  if (b.errors?.length) throw new Error(b.errors[0].message || "AniList error");
+  return b.data?.Media || null;
 }
 
 function parseAnikoto(html: string) {
   const out: any[] = [];
-  const itemBlocks = html.match(/<a\b[^>]*class=["'][^"']*\bitem\b[^"']*["'][^>]*>[\s\S]*?<\/a>/gi) || [];
-  for (const block of itemBlocks) {
-    const href = block.match(/\bhref=["']([^"']+)["']/i)?.[1];
-    if (!href) continue;
-    const url = resolveUrl(href.replace(/\\\//g, "/"), ANIKOTO_URL);
+  const re = /<a\b([^>]*\bhref=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const attrs = m[1], inner = m[2];
+    const href = attrs.match(/\bhref=["']([^"']+)["']/i)?.[1];
+    const url = href ? abs(href.replace(/\\\//g, "/")) : null;
     if (!url) continue;
-    const titleMatch = block.match(/class=["'][^"']*\bd-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/i);
-    const dataJp = block.match(/data-jp=["']([^"']*)["']/i)?.[1] || "";
-    const title = cleanHtml(titleMatch?.[1] || dataJp);
-    const jp = cleanHtml(dataJp);
-    const type = cleanHtml(block.match(/<span[^>]*class=["'][^"']*\bdot\b[^"']*["'][^>]*>\s*([^<]+?)\s*<\/span>/i)?.[1] || "");
-    const scoreMatch = block.match(/<span[^>]*class=["'][^"']*\bdot\b[^"']*["'][^>]*>[\s\S]*?([0-9]+(?:\.[0-9]+)?)[\s\S]*?<\/span>/i);
-    const yearMatch = block.match(/(?:year|release)[^>]*>\s*(\d{4})\s*<\//i);
-    out.push({ url, slug: slugFromUrl(url), jp, title, type, score: scoreMatch ? Number(scoreMatch[1]) : null, year: yearMatch?.[1] || null });
+    const slug = slugFromUrl(url);
+    if (!slug || out.some(x => x.slug === slug)) continue;
+    const dataJp = attrs.match(/\bdata-jp=["']([^"']*)["']/i)?.[1] || "";
+    const dataTitle = attrs.match(/\b(?:data-title|title)=["']([^"']*)["']/i)?.[1] || "";
+    let title = decodeText(dataTitle || dataJp || inner);
+    title = title.replace(/\b(?:Watch|Episode)\b.*$/i, "").trim();
+    if (!title) title = slug.replace(/-/g, " ");
+    const year = inner.match(/\b(19|20)\d{2}\b/)?.[0] || attrs.match(/\bdata-year=["'](\d{4})["']/i)?.[1] || null;
+    const type = decodeText(inner.match(/\b(movie|tv|ova|ona|special|music)\b/i)?.[1] || attrs.match(/\bdata-type=["']([^"']+)/i)?.[1] || "");
+    out.push({ url, slug, title, jp: dataJp, year, type });
   }
-  return out.filter(x => x.slug);
+  return out;
 }
 
 async function anikotoSearch(keyword: string) {
-  const ajax = new URL("/ajax/anime/search", ANIKOTO_URL);
-  ajax.searchParams.set("keyword", keyword);
   const headers = {
-    Referer: `${ANIKOTO_URL}/`, Origin: ANIKOTO_URL,
-    "X-Requested-With": "XMLHttpRequest",
-    Accept: "application/json, text/javascript, */*",
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+    Accept: "text/html,application/xhtml+xml,application/json,*/*",
+    Referer: `${ANIKOTO_URL}/`,
   };
-  try {
-    const r = await fetch(ajax, { headers });
-    if (r.ok) {
-      const body: any = await r.json();
-      const results = parseAnikoto(body?.result?.html || body?.html || "");
-      if (results.length) return results;
-    }
-  } catch {}
 
-  const page = new URL("/filter/", ANIKOTO_URL);
+  // The normal site filter is more reliable than guessing a private AJAX API.
+  const page = new URL("/filter", ANIKOTO_URL);
   page.searchParams.set("keyword", keyword);
-  const r = await fetch(page, { headers: { "User-Agent": headers["User-Agent"], Accept: "text/html,*/*" } });
+  const r = await fetch(page, { headers, redirect: "follow" });
   if (!r.ok) throw new Error(`Anikoto search HTTP ${r.status}`);
-  return parseAnikoto(await r.text());
+  const html = await r.text();
+  return parseAnikoto(html);
 }
 
-function candidateScore(candidate: any, variants: string[], media: any) {
-  let best = 0, matchedTitle = "";
-  for (const variant of variants) {
-    const c = normalize(candidate.title), v = normalize(variant);
-    if (!c || !v) continue;
-    let score = c === v ? 100 : Math.round(tokenScore(candidate.title, variant) * 80);
-    if (score > best) { best = score; matchedTitle = variant; }
+function scoreCandidate(c: any, metadata: any) {
+  const variants = titleVariants(metadata);
+  let score = 0, matchedTitle = "";
+  for (const v of variants) {
+    const a = normalize(c.title), b = normalize(v);
+    if (!a || !b) continue;
+    let s = a === b ? 100 : Math.round(tokenScore(c.title, v) * 80);
+    // Strongly reward slug/title equivalence as well.
+    const slugText = normalize(c.slug.replace(/-/g, " "));
+    if (slugText === b) s = Math.max(s, 96);
+    if (s > score) { score = s; matchedTitle = v; }
   }
-  if (media?.seasonYear && candidate.year && Number(media.seasonYear) === Number(candidate.year)) best += 15;
-  const format = String(media?.format || "").toLowerCase();
-  const type = String(candidate.type || "").toLowerCase();
-  if (format === "movie" && type.includes("movie")) best += 10;
-  if (format !== "movie" && type === "tv") best += 8;
-  return { score: Math.min(best, 120), matchedTitle };
+  if (metadata.seasonYear && c.year && Number(metadata.seasonYear) === Number(c.year)) score += 15;
+  const fmt = String(metadata.format || "").toLowerCase();
+  const type = String(c.type || "").toLowerCase();
+  if (fmt === "movie" && type.includes("movie")) score += 12;
+  if (fmt !== "movie" && (!type || type === "tv")) score += 5;
+  return { score: Math.min(score, 120), matchedTitle };
 }
 
-async function resolveByAniList(id: number) {
-  const media = await anilist(id);
-  if (!media) return json({ ok: false, error: "AniList anime not found" }, 404);
+async function resolveFromMetadata(metadata: any) {
+  const variants = titleVariants(metadata);
+  if (!variants.length) return json({ ok: false, error: "Missing anime title metadata" }, 400);
 
-  const variants = titleVariants(media);
-  const searchTerms = [...new Set(variants)].sort((a, b) => b.length - a.length).slice(0, 8);
+  // Search all useful names, then deduplicate by Anikoto slug.
+  const terms = [...new Set(variants)].sort((a, b) => b.length - a.length).slice(0, 8);
   const all = new Map<string, any>();
-  for (const term of searchTerms) {
+  for (const term of terms) {
     try {
       for (const c of await anikotoSearch(term)) if (c.slug) all.set(c.slug, c);
     } catch {}
   }
 
-  const ranked = [...all.values()].map(c => ({ ...c, ...candidateScore(c, variants, media) }))
+  const ranked = [...all.values()].map(c => ({ ...c, ...scoreCandidate(c, metadata) }))
     .sort((a, b) => b.score - a.score);
   const best = ranked[0] || null;
   const second = ranked[1] || null;
   const confident = !!best && best.score >= 90;
-  const ambiguous = !!best && !!second && best.score >= 90 && second.score >= 90 && best.score - second.score < 8;
-  const match = confident && !ambiguous ? { title: best.title, slug: best.slug, url: best.url, score: best.score, matchedTitle: best.matchedTitle } : null;
+  const ambiguous = !!best && !!second && best.score >= 90 && second.score >= 90 && best.score - second.score < 7;
+  const match = confident && !ambiguous ? {
+    title: best.title,
+    slug: best.slug,
+    url: best.url,
+    score: best.score,
+    matchedTitle: best.matchedTitle,
+  } : null;
 
   return json({
     ok: !!match,
-    anilist: { id: media.id, idMal: media.idMal, format: media.format, episodes: media.episodes, seasonYear: media.seasonYear, title: media.title, synonyms: media.synonyms, source: media._source || "graphql" },
+    metadata,
     match,
     alternatives: ranked.slice(0, 10),
-    searched: searchTerms,
+    searched: terms,
     reason: !best ? "No Anikoto candidate found" : ambiguous ? "Ambiguous match" : match ? "Exact/high-confidence match" : "No high-confidence match",
   });
 }
 
-/* ---------- Universal fetch / inspect compatibility ---------- */
-function validateTarget(target: string) {
+async function readResolveMetadata(request: Request, url: URL) {
+  const input: any = {};
+  for (const key of ["title","name","english","romaji","native","userPreferred","synonyms","year","seasonYear","format","episodes","idMal","mal","id","anilist"]) {
+    const v = url.searchParams.get(key);
+    if (v !== null) input[key] = v;
+  }
+  if (request.method === "POST") {
+    const ct = request.headers.get("content-type") || "";
+    if (ct.includes("application/json")) {
+      try { Object.assign(input, await request.clone().json()); } catch {}
+    } else if (ct.includes("form")) {
+      try { const f = await request.clone().formData(); for (const [k,v] of f) input[k] = String(v); } catch {}
+    }
+  }
+  return input;
+}
+
+function validateTarget(raw: string) {
   let u: URL;
-  try { u = new URL(target); } catch { throw Object.assign(new Error("Invalid target URL"), { status: 400 }); }
+  try { u = new URL(raw); } catch { throw Object.assign(new Error("Invalid target URL"), { status: 400 }); }
   if (!["http:", "https:"].includes(u.protocol)) throw Object.assign(new Error("Only HTTP(S) URLs are supported"), { status: 400 });
   const h = u.hostname.toLowerCase();
-  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0" || h.endsWith(".local")) throw Object.assign(new Error("Local targets are blocked"), { status: 403 });
+  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".local")) throw Object.assign(new Error("Local targets are blocked"), { status: 403 });
   return u;
 }
 
-function upstreamHeaders(url: URL, request: Request) {
+function upstreamHeaders(request: Request) {
   const h = new Headers();
-  for (const n of ["Accept", "Accept-Language", "Content-Type", "Range", "If-None-Match", "If-Modified-Since", "User-Agent"]) {
+  for (const n of ["Accept","Accept-Language","Content-Type","Range","If-None-Match","If-Modified-Since","User-Agent"]) {
     const v = request.headers.get(n); if (v) h.set(n, v);
   }
-  const referer = url.searchParams.get("referer"), origin = url.searchParams.get("origin");
-  if (referer) h.set("Referer", referer);
-  if (origin) h.set("Origin", origin);
-  for (const [k, v] of url.searchParams) if (k.toLowerCase().startsWith("header_")) h.set(k.slice(7), v);
   return h;
 }
 
 function unique(a: string[]) { return [...new Set(a)]; }
-function extractMatches(text: string, re: RegExp) { const out: string[] = []; let m; while ((m = re.exec(text))) out.push(m[1]); return out; }
-function extractEndpoints(text: string, base: string) {
+function endpoints(text: string, base: string) {
   const out: string[] = [];
   const patterns = [
     /["'`]((?:https?:)?\/\/[^"'`\s<>]+)["'`]/gi,
     /["'`]((?:\/|\.\/|\.\.\/)(?:api|ajax|graphql|search|filter|watch|episode|episodes|stream|source|player|download|proxy)[^"'`\s<>]*)["'`]/gi,
     /["'`]([^"'`\s<>]+\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?[^"'`\s<>]*)?)["'`]/gi,
   ];
-  for (const re of patterns) for (const x of extractMatches(text, re)) { const u = resolveUrl(x, base); if (u) out.push(u); }
+  for (const re of patterns) { let m: RegExpExecArray | null; while ((m = re.exec(text))) { const u = abs(m[1], base); if (u) out.push(u); } }
   return unique(out);
 }
 
 async function inspectPage(target: URL, request: Request) {
-  const h = upstreamHeaders(target, request);
-  h.set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
+  const h = upstreamHeaders(request);
   h.set("User-Agent", h.get("User-Agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");
   const r = await fetch(target, { headers: h, redirect: "follow" });
-  const ct = r.headers.get("content-type") || "", body = await r.text();
-  if (!ct.includes("text/html") && !/<(?:html|head|script|body)\b/i.test(body)) return json({ ok: true, status: r.status, finalUrl: r.url, contentType: ct, note: "Response is not HTML; inspect returned the response metadata only.", bodyPreview: body.slice(0, 2000) });
-  const scripts = unique(extractMatches(body, /<script[^>]+src=["']([^"']+)["']/gi).map(x => resolveUrl(x, r.url)).filter(Boolean) as string[]);
-  const links = unique(extractMatches(body, /<link[^>]+href=["']([^"']+)["']/gi).map(x => resolveUrl(x, r.url)).filter(Boolean) as string[]);
-  const iframes = unique(extractMatches(body, /<iframe[^>]+src=["']([^"']+)["']/gi).map(x => resolveUrl(x, r.url)).filter(Boolean) as string[]);
-  const hrefs = unique(extractMatches(body, /(?:href|action)=["']([^"']+)["']/gi).map(x => resolveUrl(x, r.url)).filter(Boolean) as string[]);
+  const ct = r.headers.get("content-type") || "";
+  const body = await r.text();
+  if (!ct.includes("text/html") && !/<(?:html|script|body)\b/i.test(body)) return json({ ok: true, status: r.status, finalUrl: r.url, contentType: ct, bodyPreview: body.slice(0,2000) });
+  const scripts = unique([...body.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(x => abs(x[1], r.url)).filter(Boolean) as string[]);
+  const iframes = unique([...body.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(x => abs(x[1], r.url)).filter(Boolean) as string[]);
+  const hrefs = unique([...body.matchAll(/(?:href|action)=["']([^"']+)["']/gi)].map(x => abs(x[1], r.url)).filter(Boolean) as string[]);
+  const found = endpoints(body, r.url);
   const assetFindings: any[] = [];
-  let bytes = 0;
-  for (const s of scripts.filter(x => /\.m?js(?:[?#]|$)/i.test(x)).slice(0, 12)) {
-    try { const ar = await fetch(s, { headers: { "User-Agent": h.get("User-Agent")! } }); const text = await ar.text(); bytes += text.length; if (bytes > 1500000) break; const found = extractEndpoints(text, s); if (found.length) assetFindings.push({ script: s, endpoints: found.slice(0, 100) }); } catch {}
+  for (const s of scripts.filter(x => /\.m?js(?:[?#]|$)/i.test(x)).slice(0,12)) {
+    try { const ar = await fetch(s, { headers: { "User-Agent": h.get("User-Agent")! } }); const text = await ar.text(); const e = endpoints(text, s); if (e.length) assetFindings.push({ script:s, endpoints:e.slice(0,100) }); } catch {}
   }
-  const endpoints = extractEndpoints(body, r.url);
-  return json({ ok: true, status: r.status, finalUrl: r.url, contentType: ct,
-    page: { title: (body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "").trim(), size: body.length },
-    scripts, links: links.slice(0, 100), iframes, ajaxCalls: [],
-    apiEndpoints: endpoints.filter(x => /(?:\/api\/|\/ajax\/|graphql|\.json(?:\?|$))/i.test(x)).slice(0, 200),
-    mediaEndpoints: endpoints.filter(x => /\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?|$)/i.test(x)).slice(0, 200),
-    dataUrls: [], hrefs: hrefs.slice(0, 200), javascriptAssetFindings: assetFindings,
-    note: "Static inspection only; browser-executed JavaScript requests are not observed by a Worker."
+  return json({ ok:true, status:r.status, finalUrl:r.url, contentType:ct,
+    page:{ title: decodeText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || ""), size:body.length },
+    scripts, iframes, ajaxCalls:[],
+    apiEndpoints:found.filter(x => /(?:\/api\/|\/ajax\/|graphql|\.json(?:\?|$))/i.test(x)),
+    mediaEndpoints:found.filter(x => /\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?|$)/i.test(x)),
+    dataUrls:[], hrefs, javascriptAssetFindings:assetFindings,
+    note:"Static inspection only; browser-executed JavaScript requests are not observed by a Worker."
   });
 }
 
-async function universalFetch(url: URL, request: Request) {
+async function proxy(url: URL, request: Request) {
   const target = validateTarget(url.searchParams.get("url")!);
-  const r = await fetch(target, { method: request.method, headers: upstreamHeaders(url, request), redirect: "follow", body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body });
+  const r = await fetch(target, { method:request.method, headers:upstreamHeaders(request), redirect:"follow", body:["GET","HEAD"].includes(request.method) ? undefined : request.body });
   const h = new Headers();
-  for (const n of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control", "Expires", "Location", "Content-Encoding"]) { const v = r.headers.get(n); if (v) h.set(n, v); }
-  Object.entries(CORS).forEach(([k, v]) => h.set(k, v));
-  h.set("X-Universal-Proxy-Status", String(r.status)); h.set("X-Universal-Proxy-Target", target.origin);
-  return new Response(r.body, { status: r.status, statusText: r.statusText, headers: h });
+  for (const n of ["Content-Type","Content-Length","Content-Range","Accept-Ranges","ETag","Last-Modified","Cache-Control","Expires","Location","Content-Encoding"]) { const v=r.headers.get(n); if(v) h.set(n,v); }
+  Object.entries(CORS).forEach(([k,v]) => h.set(k,v));
+  return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h});
 }
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+    if (request.method === "OPTIONS") return new Response(null,{status:204,headers:CORS});
     try {
       const url = new URL(request.url);
+
       if (url.pathname === "/resolve") {
-        const id = Number(url.searchParams.get("anilist"));
-        if (!Number.isInteger(id) || id <= 0) return json({ ok: false, error: "Use ?anilist=<AniList ID>" }, 400);
-        return await resolveByAniList(id);
+        const input = await readResolveMetadata(request,url);
+        // Metadata supplied by the app is preferred. AniList is only an optional
+        // convenience when the caller supplies no title metadata.
+        const supplied = makeMetadata(input);
+        if (titleVariants(supplied).length) return await resolveFromMetadata(supplied);
+        const id = Number(input.anilist || input.id);
+        if (Number.isInteger(id) && id > 0) {
+          try { return await resolveFromMetadata(makeMetadata(await getAniListMetadata(id))); }
+          catch (e:any) { return json({ok:false,error:e?.message || "AniList lookup failed",hint:"Send anime metadata such as title/romaji/english/year/format instead of relying on AniList."},502); }
+        }
+        return json({ok:false,error:"Missing anime metadata",expected:{title:"Re:ZERO -Starting Life in Another World-",romaji:"Re:Zero kara Hajimeru Isekai Seikatsu",english:"Re:ZERO -Starting Life in Another World-",synonyms:["Re:Zero"],year:2016,format:"TV",episodes:25}},400);
       }
+
       if (url.pathname === "/search") {
         const keyword = url.searchParams.get("keyword")?.trim();
-        if (!keyword) return json({ ok: false, error: "Use ?keyword=<title>" }, 400);
+        if (!keyword) return json({ok:false,error:"Use ?keyword=<title>"},400);
         const results = await anikotoSearch(keyword);
-        return json({ ok: true, keyword, count: results.length, results });
+        return json({ok:true,keyword,count:results.length,results});
       }
+
       if (url.pathname === "/inspect") {
-        const raw = url.searchParams.get("url");
-        if (!raw) return json({ ok: false, error: "Missing ?url=" }, 400);
-        return await inspectPage(validateTarget(raw), request);
+        const raw=url.searchParams.get("url");
+        if(!raw) return json({ok:false,error:"Missing ?url="},400);
+        return await inspectPage(validateTarget(raw),request);
       }
+
       if (url.pathname === "/fetch" || url.pathname === "/proxy" || url.searchParams.has("url")) {
-        if (!url.searchParams.has("url")) return json({ ok: false, error: "Missing ?url=" }, 400);
-        return await universalFetch(url, request);
+        if(!url.searchParams.has("url")) return json({ok:false,error:"Missing ?url="},400);
+        return await proxy(url,request);
       }
-      return json({ ok: true, service: "Fetcher + AniList → Anikoto resolver", endpoints: {
-        resolve: "/resolve?anilist=<id>", search: "/search?keyword=<title>", inspect: "/inspect?url=<url>",
-        fetch: "/fetch?url=<url>", proxy: "/proxy?url=<url>"
+
+      return json({ok:true,service:"Fetcher + metadata → Anikoto resolver",endpoints:{
+        resolve:"/resolve?title=<name>&romaji=<romaji>&english=<english>&year=<year>&format=<TV|MOVIE>&episodes=<count>",
+        resolvePost:"POST /resolve with JSON metadata",search:"/search?keyword=<title>",inspect:"/inspect?url=<url>",fetch:"/fetch?url=<url>",proxy:"/proxy?url=<url>"
       }});
-    } catch (error: any) {
-      return json({ ok: false, error: error?.message || "Internal error" }, error?.status || 500);
+    } catch(error:any) {
+      return json({ok:false,error:error?.message || "Internal error"},error?.status || 500);
     }
   }
 };
