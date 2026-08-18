@@ -32,18 +32,30 @@ function decodeText(s:string){return s.replace(/<[^>]*>/g," ").replace(/&amp;/g,
 function unique<T>(a:T[]){return [...new Set(a)]}
 
 function metadataTitles(m:any){
-  const t=m?.title||{}; const syn=Array.isArray(m?.synonyms)?m.synonyms:String(m?.synonyms||"").split(",");
-  return unique([t.english,t.romaji,t.native,t.userPreferred,m?.english,m?.romaji,m?.native,m?.userPreferred,m?.title,m?.name,...syn].filter(Boolean).map(String));
+  const t=m?.title||{};
+  const syn=Array.isArray(m?.synonyms)?m.synonyms:String(m?.synonyms||"").split(",");
+  // Do not stringify the structured title object itself: that created [object Object]
+  // in the search terms. Only use actual title strings.
+  return unique([
+    t.english,t.romaji,t.native,t.userPreferred,
+    m?.english,m?.romaji,m?.native,m?.userPreferred,m?.name,
+    ...syn
+  ].filter(v=>typeof v === "string" && v.trim()).map(String));
 }
 function makeMetadata(input:any){
   const syn=Array.isArray(input.synonyms)?input.synonyms:String(input.synonyms||"").split(",").map((x:string)=>x.trim()).filter(Boolean);
-  return {id:Number(input.anilist||input.id)||null,idMal:Number(input.idMal||input.mal)||null,format:input.format?String(input.format).toUpperCase():null,episodes:Number(input.episodes)||null,seasonYear:Number(input.seasonYear||input.year)||null,title:{english:input.english||input.title||input.name||null,romaji:input.romaji||input.title||input.name||null,native:input.native||null,userPreferred:input.userPreferred||input.title||input.name||null},synonyms:unique([input.title,input.name,input.english,input.romaji,input.native,input.userPreferred,...syn].filter(Boolean).map(String))};
+  return {id:Number(input.anilist||input.id)||null,idMal:Number(input.idMal||input.mal)||null,format:input.format?String(input.format).toUpperCase():null,episodes:Number(input.episodes)||null,seasonYear:Number(input.seasonYear||input.year)||null,title:{english:input.english||input.title||input.name||null,romaji:input.romaji||input.title||input.name||null,native:input.native||null,userPreferred:input.userPreferred||input.title||input.name||null},synonyms:unique([input.title,input.name,input.english,input.romaji,input.native,input.userPreferred,...syn].filter(v=>typeof v === "string" && v.trim()).map(String))};
 }
 
 // Anikoto appends a random 5-character identifier to each show slug.
 function baseSlug(slug:string){return String(slug||"").replace(/-([a-z0-9]{5})$/i,"").replace(/-+/g,"-").replace(/^-|-$/g,"")}
 function slugTitle(slug:string){return decodeURIComponent(baseSlug(slug)).replace(/[-_]+/g," ").trim()}
 function seasonNumber(slug:string){const s=baseSlug(slug).toLowerCase();const m=s.match(/(?:^|[- ])season[- ]?(\d+)(?:$|[- ])/);return m?Number(m[1]):0}
+function episodeUrlFromShow(url:string,episode:number|string=1){
+  const n=Math.max(1,Number(episode)||1);
+  const clean=String(url||"").replace(/\/+$/g,"").replace(/\/ep-\d+$/i,"");
+  return `${clean}/ep-${n}`;
+}
 
 function parseAnikoto(html:string){
   const out:any[]=[]; const re=/<a\b([^>]*\bhref=["'][^"']*\/watch\/[^"']+["'][^>]*)>([\s\S]*?)<\/a>/gi; let m:RegExpExecArray|null;
@@ -80,18 +92,18 @@ function scoreCandidate(c:any,metadata:any){
   return {score:Math.round(Math.max(0,Math.min(140,best))),matchedTitle,matchSource};
 }
 
-async function resolveFromMetadata(metadata:any){
+async function resolveFromMetadata(metadata:any,episode:number|string=1){
   const variants=metadataTitles(metadata); if(!variants.length)return json({ok:false,error:"Missing anime title metadata"},400);
   const terms=unique(variants).sort((a,b)=>b.length-a.length).slice(0,8); const all=new Map<string,any>();
   for(const term of terms){try{for(const c of await anikotoSearch(term))all.set(c.slug,c)}catch{}}
   const ranked=[...all.values()].map(c=>({...c,...scoreCandidate(c,metadata)})).sort((a,b)=>b.score-a.score);
   const best=ranked[0]||null,second=ranked[1]||null; const confident=!!best&&best.score>=90; const ambiguous=!!best&&!!second&&best.score>=100&&second.score>=100&&(best.score-second.score<5);
-  const match=confident&&!ambiguous?{title:best.slugTitle||best.title,slug:best.slug,url:best.url,episodeUrl:`${best.url.replace(/\/+$/,"")}/ep-1`,score:best.score,matchedTitle:best.matchedTitle,matchSource:best.matchSource,season:best.season||0}:null;
+  const match=confident&&!ambiguous?{title:best.slugTitle||best.title,slug:best.slug,url:best.url,episodeUrl:episodeUrlFromShow(best.url,episode),score:best.score,matchedTitle:best.matchedTitle,matchSource:best.matchSource,season:best.season||0}:null;
   return json({ok:!!match,metadata,match,alternatives:ranked.slice(0,10),searched:terms,reason:!best?"No Anikoto candidate found":ambiguous?"Ambiguous match":match?"Exact/high-confidence match":"No high-confidence match"});
 }
 
 async function readMetadata(request:Request,url:URL){
-  const input:any={}; for(const key of ["title","name","english","romaji","native","userPreferred","synonyms","year","seasonYear","format","episodes","idMal","mal","id","anilist"]){const v=url.searchParams.get(key);if(v!==null)input[key]=v}
+  const input:any={}; for(const key of ["title","name","english","romaji","native","userPreferred","synonyms","year","seasonYear","format","episodes","episode","idMal","mal","id","anilist"]){const v=url.searchParams.get(key);if(v!==null)input[key]=v}
   if(request.method==="POST"){const ct=request.headers.get("content-type")||"";try{if(ct.includes("application/json"))Object.assign(input,await request.clone().json());else if(ct.includes("form")){const f=await request.clone().formData();for(const [k,v]of f)input[k]=String(v)}}catch{}}
   return input;
 }
@@ -102,15 +114,19 @@ function endpoints(text:string,base:string){const out:string[]=[];const patterns
 
 async function inspectPage(target:URL,request:Request){const h=upstreamHeaders(request);h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(target,{headers:h,redirect:"follow"});const ct=r.headers.get("content-type")||"";const body=await r.text();if(!ct.includes("text/html")&&!/<(?:html|script|body)\b/i.test(body))return json({ok:true,status:r.status,finalUrl:r.url,contentType:ct,bodyPreview:body.slice(0,2000)});const scripts=unique([...body.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const iframes=unique([...body.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const hrefs=unique([...body.matchAll(/(?:href|action)=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const found=endpoints(body,r.url);const assetFindings:any[]=[];for(const s of scripts.filter(x=>/\.m?js(?:[?#]|$)/i.test(x)).slice(0,12)){try{const ar=await fetch(s,{headers:{"User-Agent":h.get("User-Agent")!}});const text=await ar.text();const e=endpoints(text,s);if(e.length)assetFindings.push({script:s,endpoints:e.slice(0,100)})}catch{}}return json({ok:true,status:r.status,finalUrl:r.url,contentType:ct,page:{title:decodeText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||""),size:body.length},scripts,iframes,ajaxCalls:[],apiEndpoints:found.filter(x=>/(?:\/api\/|\/ajax\/|graphql|\.json(?:\?|$))/i.test(x)),mediaEndpoints:found.filter(x=>/\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?|$)/i.test(x)),dataUrls:[],hrefs,javascriptAssetFindings:assetFindings,note:"Static inspection only; browser-executed JavaScript requests are not observed by a Worker."})}
 
-async function proxy(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const r=await fetch(u,{method:request.method,headers:upstreamHeaders(request),redirect:"follow",body:["GET","HEAD"].includes(request.method)?undefined:request.body});const h=new Headers(CORS);for(const n of ["Content-Type","Content-Length","Content-Range","Accept-Ranges","ETag","Last-Modified","Cache-Control","Expires","Location","Content-Encoding"]){const v=r.headers.get(n);if(v)h.set(n,v)}return new Response(r.body,{status:r.status,headers:h})}
+async function proxy(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const r=await fetch(u,{method:request.method,headers:upstreamHeaders(request),redirect:"follow",body:["GET","HEAD"].includes(request.method)?undefined:request.body});const h=new Headers(CORS);for(const n of ["Content-Type","Content-Length","Content-Range","Accept-Ranges","ETag","Last-Modified","Cache-Control","Expires","Location","Content-Encoding"]){const v=r.headers.get(n);if(v)h.set(n,v)}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h})}
 async function fetchPage(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const h=upstreamHeaders(request);h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(u,{headers:h,redirect:"follow"});return json({ok:r.ok,status:r.status,finalUrl:r.url,contentType:r.headers.get("content-type")||"",body:await r.text()},r.ok?200:r.status)}
 
 export default {async fetch(request:Request):Promise<Response>{if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});const url=new URL(request.url),path=url.pathname.replace(/\/+$/,"")||"/";try{
-  if(path==="/"||path==="/help")return json({ok:true,service:"Fetcher + Anikoto resolver",endpoints:{resolve:"/resolve?title=Re:ZERO%20-Starting%20Life%20in%20Another%20World-&year=2016&format=TV&episodes=25",search:"/search?keyword=Naruto",inspect:"/inspect?url=<url>",fetch:"/fetch?url=<url>",proxy:"/proxy?url=<url>"},note:"POST AniList metadata to /resolve from your APK/HTML. Resolver does not depend on AniList GraphQL."});
-  if(path==="/resolve"){const metadata=makeMetadata(await readMetadata(request,url));return resolveFromMetadata(metadata)}
+  if(path==="/resolve"){
+    const input=await readMetadata(request,url);
+    const metadata=makeMetadata(input);
+    const episode=Math.max(1,Number(input.episode||1)||1);
+    return await resolveFromMetadata(metadata,episode);
+  }
   if(path==="/search"){const keyword=url.searchParams.get("keyword")||url.searchParams.get("q")||"";if(!keyword.trim())return json({ok:false,error:"Missing ?keyword="},400);return json({ok:true,keyword,results:await anikotoSearch(keyword.trim())})}
   if(path==="/inspect"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return inspectPage(validateTarget(raw),request)}
   if(path==="/fetch"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return fetchPage(url,request)}
   if(path==="/proxy"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return proxy(url,request)}
-  return json({ok:false,error:"Not found"},404);
+  return json({ok:true,service:"Fetcher + metadata → Anikoto resolver",endpoints:{resolve:"/resolve?title=<name>&romaji=<romaji>&english=<english>&year=<year>&format=<TV|MOVIE>&episodes=<count>&episode=<number>",resolvePost:"POST /resolve with JSON metadata",search:"/search?keyword=<title>",inspect:"/inspect?url=<url>",fetch:"/fetch?url=<url>",proxy:"/proxy?url=<url>"}});
 }catch(e:any){return json({ok:false,error:String(e?.message||e)},Number(e?.status)||500)}}};
