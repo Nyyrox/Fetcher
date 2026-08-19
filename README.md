@@ -1,6 +1,50 @@
-# Universal Fetch Worker
+# Fetcher API
 
-A small Cloudflare Worker for testing public HTTP APIs and CDN resources from a browser without repeatedly creating a new proxy.
+A Cloudflare Worker for authorized HTTP fetching, HTML/player inspection, JavaScript asset inspection, and CDN/media proxying.
+
+## Home / API docs
+
+`/` is the API documentation home in the site UI.
+
+## Current API
+
+### Fetch
+`GET /fetch?url=<url>`
+
+Fetches an HTTP(S) resource and returns its response as JSON metadata/body.
+
+### Proxy
+`GET|HEAD /proxy?url=<url>&referer=<url>&origin=<url>`
+
+Proxies an HTTP(S) resource and forwards common media/range headers.
+
+### HTML inspection
+`GET /inspect?url=<html-url>`
+
+Extracts scripts, iframes, links, API candidates, media candidates and linked JavaScript clues.
+
+### Player inspection
+`GET /inspect-player?url=<player-url>`
+
+Inspects a player page and linked player scripts. It is static and does not execute browser JavaScript.
+
+### Anime resolver
+`GET /resolve?...`
+
+Metadata-based Anikoto resolver. Supports the existing title/romaji/English/year/format/episode parameters.
+
+### Anime search
+`GET /search?keyword=<title>`
+
+Searches Anikoto and returns normalized candidates.
+
+## Planned/extended inspection helpers
+
+The repository is being expanded with dedicated helpers for extracting inline scripts, inspecting individual JS assets, and extracting page links. These helpers are intentionally read-only and static: they do not execute arbitrary remote JavaScript, bypass DRM/CAPTCHA, or defeat access controls.
+
+## Headers
+
+For upstream requests, use `referer`, `origin`, and `header_<Name>` query parameters where appropriate. The Worker also forwards common request headers such as `Accept`, `Accept-Language`, `Content-Type`, `Range`, `ETag`, and `If-Modified-Since`.
 
 ## Deploy
 
@@ -10,32 +54,6 @@ wrangler login
 wrangler deploy
 ```
 
-## Examples
+`wrangler.toml` currently uses `src/index.ts` as the Worker entrypoint.
 
-API:
-
-```text
-https://YOUR-WORKER.workers.dev/?url=https%3A%2F%2Fexample.com%2Fapi
-```
-
-or:
-
-```text
-https://YOUR-WORKER.workers.dev/fetch?url=https%3A%2F%2Fexample.com%2Fapi
-```
-
-M3U8:
-
-```text
-https://YOUR-WORKER.workers.dev/proxy?url=https%3A%2F%2Fcdn.example.com%2Fmaster.m3u8
-```
-
-With Referer:
-
-```text
-https://YOUR-WORKER.workers.dev/proxy?url=https%3A%2F%2Fcdn.example.com%2Fmaster.m3u8&referer=https%3A%2F%2Fexample.com%2F
-```
-
-The worker supports GET/HEAD/POST/PUT/PATCH/DELETE and forwards request bodies for non-GET methods.
-
-Use it only with endpoints/CDNs you are authorized to access.
+Use only with endpoints/CDNs you are authorized to access.
