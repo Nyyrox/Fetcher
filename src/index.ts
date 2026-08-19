@@ -1,6 +1,9 @@
 import { browserTrace } from "./browser-trace";
 
 const ANIKOTO_URL = "https://anikototv.to";
+const CRICKLY_JTV_HOST = "jtv.crickly.workers.dev";
+const CRICKLY_JTV_PAGE = "https://cricklyjtv.pages.dev/";
+const CRICKLY_JTV_ORIGIN = "https://cricklyjtv.pages.dev";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -100,13 +103,37 @@ async function readMetadata(request:Request,url:URL){
 }
 
 function validateTarget(raw:string){let u:URL;try{u=new URL(raw)}catch{throw Object.assign(new Error("Invalid target URL"),{status:400})}if(!["http:","https:"].includes(u.protocol))throw Object.assign(new Error("Only HTTP(S) URLs are supported"),{status:400});const h=u.hostname.toLowerCase();if(h==="localhost"||h==="127.0.0.1"||h==="::1"||h.endsWith(".local"))throw Object.assign(new Error("Local targets are blocked"),{status:403});return u}
-function upstreamHeaders(request:Request){const h=new Headers();for(const n of ["Accept","Accept-Language","Content-Type","Range","If-None-Match","If-Modified-Since","User-Agent"]){const v=request.headers.get(n);if(v)h.set(n,v)}return h}
+function upstreamHeaders(request:Request){
+  const h=new Headers();
+  for(const n of ["Accept","Accept-Language","Content-Type","Range","If-None-Match","If-Modified-Since","User-Agent"]){const v=request.headers.get(n);if(v)h.set(n,v)}
+  const incoming=new URL(request.url);
+  const explicitReferer=incoming.searchParams.get("referer");
+  const explicitOrigin=incoming.searchParams.get("origin");
+  if(explicitReferer)h.set("Referer",explicitReferer);
+  if(explicitOrigin)h.set("Origin",explicitOrigin);
+  for(const [key,value] of incoming.searchParams){
+    if(key.toLowerCase().startsWith("header_")){
+      const name=key.slice(7);
+      if(name)h.set(name,value);
+    }
+  }
+  if(!h.has("User-Agent"))h.set("User-Agent","Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");
+  return h;
+}
+function applyCricklyContext(target:URL,headers:Headers){
+  if(target.hostname.toLowerCase()===CRICKLY_JTV_HOST){
+    if(!headers.has("Referer"))headers.set("Referer",CRICKLY_JTV_PAGE);
+    if(!headers.has("Origin"))headers.set("Origin",CRICKLY_JTV_ORIGIN);
+    headers.set("Accept","application/json,text/plain,*/*");
+  }
+  return headers;
+}
 function endpoints(text:string,base:string){const out:string[]=[];const patterns=[/["'`]((?:https?:)?\/\/[^"'`\s<>]+)["'`]/gi,/["'`]((?:\/|\.\/|\.\.\/)(?:api|ajax|graphql|search|filter|watch|episode|episodes|stream|source|player|download|proxy)[^"'`\s<>]*)["'`]/gi,/["'`]([^"'`\s<>]+\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?[^"'`\s<>]*)?)["'`]/gi];for(const re of patterns){let m:RegExpExecArray|null;while((m=re.exec(text))){const u=abs(m[1],base);if(u)out.push(u)}}return unique(out)}
 
-async function inspectPage(target:URL,request:Request){const h=upstreamHeaders(request);h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(target,{headers:h,redirect:"follow"});const ct=r.headers.get("content-type")||"";const body=await r.text();if(!ct.includes("text/html")&&!/<(?:html|script|body)\b/i.test(body))return json({ok:true,status:r.status,finalUrl:r.url,contentType:ct,bodyPreview:body.slice(0,2000)});const scripts=unique([...body.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const iframes=unique([...body.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const hrefs=unique([...body.matchAll(/(?:href|action)=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const found=endpoints(body,r.url);const assetFindings:any[]=[];for(const s of scripts.filter(x=>/\.m?js(?:[?#]|$)/i.test(x)).slice(0,12)){try{const ar=await fetch(s,{headers:{"User-Agent":h.get("User-Agent")!}});const text=await ar.text();const e=endpoints(text,s);if(e.length)assetFindings.push({script:s,endpoints:e.slice(0,100)})}catch{}}return json({ok:true,status:r.status,finalUrl:r.url,contentType:ct,page:{title:decodeText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||""),size:body.length},scripts,iframes,ajaxCalls:[],apiEndpoints:found.filter(x=>/(?:\/api\/|\/ajax\/|graphql|\.json(?:\?|$))/i.test(x)),mediaEndpoints:found.filter(x=>/\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?|$)/i.test(x)),dataUrls:[],hrefs,javascriptAssetFindings:assetFindings,note:"Static inspection only; browser-executed JavaScript requests are not observed by a Worker."})}
+async function inspectPage(target:URL,request:Request){const h=applyCricklyContext(target,upstreamHeaders(request));h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(target,{headers:h,redirect:"follow"});const ct=r.headers.get("content-type")||"";const body=await r.text();if(!ct.includes("text/html")&&!/<(?:html|script|body)\b/i.test(body))return json({ok:true,status:r.status,finalUrl:r.url,contentType:ct,bodyPreview:body.slice(0,2000)});const scripts=unique([...body.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const iframes=unique([...body.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const hrefs=unique([...body.matchAll(/(?:href|action)=["']([^"']+)["']/gi)].map(x=>abs(x[1],r.url)).filter(Boolean)as string[]);const found=endpoints(body,r.url);const assetFindings:any[]=[];for(const s of scripts.filter(x=>/\.m?js(?:[?#]|$)/i.test(x)).slice(0,12)){try{const ar=await fetch(s,{headers:{"User-Agent":h.get("User-Agent")!}});const text=await ar.text();const e=endpoints(text,s);if(e.length)assetFindings.push({script:s,endpoints:e.slice(0,100)})}catch{}}return json({ok:true,status:r.status,finalUrl:r.url,contentType:ct,page:{title:decodeText(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||""),size:body.length},scripts,iframes,ajaxCalls:[],apiEndpoints:found.filter(x=>/(?:\/api\/|\/ajax\/|graphql|\.json(?:\?|$))/i.test(x)),mediaEndpoints:found.filter(x=>/\.(?:m3u8|mpd|mp4|m4v|webm)(?:\?|$)/i.test(x)),dataUrls:[],hrefs,javascriptAssetFindings:assetFindings,note:"Static inspection only; browser-executed JavaScript requests are not observed by a Worker."})}
 
 async function inspectPlayer(target:URL,request:Request){
-  const h=upstreamHeaders(request);h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");
+  const h=applyCricklyContext(target,upstreamHeaders(request));h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");
   const page=await fetch(target,{headers:h,redirect:"follow"});
   const html=await page.text();
   const scriptUrls=unique([...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(x=>abs(x[1],page.url)).filter(Boolean) as string[]);
@@ -132,8 +159,18 @@ async function inspectPlayer(target:URL,request:Request){
   return json({ok:true,status:page.status,finalUrl:page.url,page:{title:decodeText(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||""),size:html.length},playerScripts,playerMarkup,inlineEndpoints:inline,javascript:candidates,note:"This route statically traces the episode page and player JavaScript. It does not execute browser JavaScript or bypass protected/DRM provider logic, so a runtime-generated provider URL may still require a real browser/network capture."});
 }
 
-async function proxy(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const r=await fetch(u,{method:request.method,headers:upstreamHeaders(request),redirect:"follow",body:["GET","HEAD"].includes(request.method)?undefined:request.body});const h=new Headers(CORS);for(const n of ["Content-Type","Content-Length","Content-Range","Accept-Ranges","ETag","Last-Modified","Cache-Control","Expires","Location","Content-Encoding"]){const v=r.headers.get(n);if(v)h.set(n,v)}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h})}
-async function fetchPage(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const h=upstreamHeaders(request);h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(u,{headers:h,redirect:"follow"});return json({ok:r.ok,status:r.status,finalUrl:r.url,contentType:r.headers.get("content-type")||"",body:await r.text()},r.ok?200:r.status)}
+async function proxy(target:URL,request:Request){
+  const u=validateTarget(target.searchParams.get("url")||"");
+  const h=applyCricklyContext(u,upstreamHeaders(request));
+  const r=await fetch(u,{method:request.method,headers:h,redirect:"follow",body:["GET","HEAD"].includes(request.method)?undefined:request.body});
+  const out=new Headers(CORS);
+  for(const n of ["Content-Type","Content-Length","Content-Range","Accept-Ranges","ETag","Last-Modified","Cache-Control","Expires","Location","Content-Encoding"]){const v=r.headers.get(n);if(v)out.set(n,v)}
+  out.set("X-Fetcher-Upstream",u.origin);
+  out.set("X-Fetcher-Referer",h.get("Referer")||"");
+  out.set("X-Fetcher-Origin",h.get("Origin")||"");
+  return new Response(r.body,{status:r.status,statusText:r.statusText,headers:out})
+}
+async function fetchPage(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const h=applyCricklyContext(u,upstreamHeaders(request));h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(u,{headers:h,redirect:"follow"});return json({ok:r.ok,status:r.status,finalUrl:r.url,contentType:r.headers.get("content-type")||"",body:await r.text()},r.ok?200:r.status)}
 
 export default {async fetch(request:Request, env:any):Promise<Response>{if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});const url=new URL(request.url),path=url.pathname.replace(/\/+$/g,"")||"/";try{
   if(path==="/resolve"){const input=await readMetadata(request,url);const metadata=makeMetadata(input);const episode=Math.max(1,Number(input.episode||1)||1);return await resolveFromMetadata(metadata,episode)}
