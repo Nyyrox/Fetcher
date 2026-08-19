@@ -1,3 +1,5 @@
+import { browserTrace } from "./browser-trace";
+
 const ANIKOTO_URL = "https://anikototv.to";
 
 const CORS = {
@@ -133,12 +135,13 @@ async function inspectPlayer(target:URL,request:Request){
 async function proxy(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const r=await fetch(u,{method:request.method,headers:upstreamHeaders(request),redirect:"follow",body:["GET","HEAD"].includes(request.method)?undefined:request.body});const h=new Headers(CORS);for(const n of ["Content-Type","Content-Length","Content-Range","Accept-Ranges","ETag","Last-Modified","Cache-Control","Expires","Location","Content-Encoding"]){const v=r.headers.get(n);if(v)h.set(n,v)}return new Response(r.body,{status:r.status,statusText:r.statusText,headers:h})}
 async function fetchPage(target:URL,request:Request){const u=validateTarget(target.searchParams.get("url")||"");const h=upstreamHeaders(request);h.set("User-Agent",h.get("User-Agent")||"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36");const r=await fetch(u,{headers:h,redirect:"follow"});return json({ok:r.ok,status:r.status,finalUrl:r.url,contentType:r.headers.get("content-type")||"",body:await r.text()},r.ok?200:r.status)}
 
-export default {async fetch(request:Request):Promise<Response>{if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});const url=new URL(request.url),path=url.pathname.replace(/\/+$/,"")||"/";try{
+export default {async fetch(request:Request, env:any):Promise<Response>{if(request.method==="OPTIONS")return new Response(null,{status:204,headers:CORS});const url=new URL(request.url),path=url.pathname.replace(/\/+$/g,"")||"/";try{
   if(path==="/resolve"){const input=await readMetadata(request,url);const metadata=makeMetadata(input);const episode=Math.max(1,Number(input.episode||1)||1);return await resolveFromMetadata(metadata,episode)}
   if(path==="/search"){const keyword=url.searchParams.get("keyword")||url.searchParams.get("q")||"";if(!keyword.trim())return json({ok:false,error:"Missing ?keyword="},400);return json({ok:true,keyword,results:await anikotoSearch(keyword.trim())})}
   if(path==="/inspect-player"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return inspectPlayer(validateTarget(raw),request)}
   if(path==="/inspect"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return inspectPage(validateTarget(raw),request)}
+  if(path==="/browser-trace"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return browserTrace(validateTarget(raw),url,env)}
   if(path==="/fetch"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return fetchPage(url,request)}
   if(path==="/proxy"){const raw=url.searchParams.get("url");if(!raw)return json({ok:false,error:"Missing ?url="},400);return proxy(url,request)}
-  return json({ok:true,service:"Fetcher + metadata → Anikoto resolver",endpoints:{resolve:"/resolve?title=<name>&romaji=<romaji>&english=<english>&year=<year>&format=<TV|MOVIE>&episodes=<count>&episode=<number>",resolvePost:"POST /resolve with JSON metadata",search:"/search?keyword=<title>",inspect:"/inspect?url=<url>",inspectPlayer:"/inspect-player?url=<episode-url>",fetch:"/fetch?url=<url>",proxy:"/proxy?url=<url>"}});
+  return json({ok:true,service:"Fetcher + metadata → Anikoto resolver",endpoints:{resolve:"/resolve?title=<name>&romaji=<romaji>&english=<english>&year=<year>&format=<TV|MOVIE>&episodes=<count>&episode=<number>",resolvePost:"POST /resolve with JSON metadata",search:"/search?keyword=<title>",inspect:"/inspect?url=<url>",inspectPlayer:"/inspect-player?url=<episode-url>",browserTrace:"/browser-trace?url=<url>",fetch:"/fetch?url=<url>",proxy:"/proxy?url=<url>"}});
 }catch(e:any){return json({ok:false,error:String(e?.message||e)},Number(e?.status)||500)}}};
