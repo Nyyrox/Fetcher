@@ -2,47 +2,43 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Anime Search</title>
+<title>Fetcher API</title>
 <style>
-:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#050505;color:#fff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -20%,#202020 0,#080808 38%,#050505 70%);min-height:100vh}.wrap{max-width:1200px;margin:auto;padding:24px}.nav{display:flex;align-items:center;gap:18px;margin-bottom:28px}.brand{font-size:24px;font-weight:800;letter-spacing:-.04em}.search{flex:1;display:flex;background:#111;border:1px solid #292929;border-radius:14px;overflow:hidden}.search input{flex:1;background:transparent;border:0;outline:0;color:#fff;padding:14px 16px;font-size:15px}.search button,.server{border:0;background:#fff;color:#000;padding:0 18px;font-weight:700;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:18px}.card{background:#101010;border:1px solid #202020;border-radius:14px;overflow:hidden;cursor:pointer;transition:.18s}.card:hover{transform:translateY(-3px);border-color:#444}.poster{width:100%;aspect-ratio:2/3;object-fit:cover;background:#181818}.pad{padding:11px}.title{font-weight:700;font-size:14px;line-height:1.3}.muted{color:#858585;font-size:12px;margin-top:5px}.hidden{display:none!important}.back{display:inline-block;margin-bottom:18px;color:#aaa;cursor:pointer}.watch{max-width:1100px;margin:auto}.player{background:#000;border:1px solid #222;border-radius:14px;overflow:hidden;aspect-ratio:16/9}.player iframe{width:100%;height:100%;border:0}.watchhead{display:flex;justify-content:space-between;gap:20px;align-items:center;margin:18px 0}.watchtitle{font-size:22px;font-weight:800}.servers{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.server{border-radius:9px;padding:10px 14px}.server.alt{background:#151515;color:#fff;border:1px solid #303030}.episodes{display:flex;gap:7px;flex-wrap:wrap}.ep{background:#151515;color:#fff;border:1px solid #292929;border-radius:8px;padding:8px 11px;cursor:pointer}.ep.active{background:#fff;color:#000}.status{color:#888;font-size:13px;margin:12px 0}.empty{padding:50px 10px;text-align:center;color:#777}.notice{padding:12px 14px;border:1px solid #292929;border-radius:10px;color:#999;background:#0d0d0d;font-size:13px;margin-top:14px}@media(max-width:600px){.wrap{padding:14px}.grid{grid-template-columns:repeat(2,1fr);gap:12px}.nav{gap:10px}.brand{font-size:19px}.search button{padding:0 12px}}
+:root{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f5f5f5;background:#050505;color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:radial-gradient(900px 500px at 50% -10%,#242424 0,#0a0a0a 45%,#050505 80%);min-height:100vh}.wrap{max-width:1180px;margin:auto;padding:28px 20px 60px}.nav{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:8px 0 30px}.brand{font-size:25px;font-weight:900;letter-spacing:-.06em}.pill{font-size:12px;color:#aaa;border:1px solid #292929;background:#101010;border-radius:999px;padding:8px 12px}.hero{padding:42px 0 34px;max-width:820px}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.16em;color:#888;font-weight:800}.hero h1{font-size:clamp(38px,7vw,70px);line-height:.98;letter-spacing:-.06em;margin:12px 0 18px}.hero p{color:#999;font-size:17px;line-height:1.6;max-width:700px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.card{background:rgba(15,15,15,.92);border:1px solid #252525;border-radius:16px;padding:20px;min-width:0}.card h2{font-size:16px;margin:0 0 7px}.card p{font-size:13px;color:#888;line-height:1.55;margin:0 0 14px}.path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#fff;background:#080808;border:1px solid #242424;border-radius:9px;padding:10px 12px;overflow:auto;white-space:nowrap}.method{display:inline-block;font-size:10px;font-weight:900;letter-spacing:.08em;background:#fff;color:#000;border-radius:5px;padding:4px 6px;margin-right:7px}.section{margin-top:42px}.section h2{font-size:24px;letter-spacing:-.04em}.table{width:100%;border-collapse:collapse;background:#0d0d0d;border:1px solid #222;border-radius:14px;overflow:hidden}.table th,.table td{text-align:left;padding:13px 14px;border-bottom:1px solid #202020;font-size:13px;vertical-align:top}.table th{color:#888;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.table td:first-child{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff}.code{background:#090909;border:1px solid #242424;border-radius:14px;padding:18px;overflow:auto;color:#ccc;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}.notice{margin-top:20px;padding:14px 16px;border:1px solid #282828;background:#0c0c0c;border-radius:12px;color:#888;font-size:12px;line-height:1.6}.foot{margin-top:50px;color:#666;font-size:12px;text-align:center}@media(max-width:720px){.grid{grid-template-columns:1fr}.wrap{padding:18px 14px 45px}.hero{padding-top:25px}.hero h1{font-size:45px}.table{display:block;overflow:auto;white-space:nowrap}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <section id="home">
-    <div class="nav"><div class="brand">ANIME</div><form class="search" id="searchForm"><input id="q" autocomplete="off" placeholder="Search anime with AniList..."><button>Search</button></form></div>
-    <div id="status" class="status">Search an anime to begin.</div>
-    <div id="results" class="grid"></div>
+  <nav class="nav"><div class="brand">FETCHER</div><div class="pill">Universal HTTP / CDN inspector</div></nav>
+  <header class="hero"><div class="eyebrow">API documentation</div><h1>Fetch it. Inspect it. Understand it.</h1><p>A lightweight Cloudflare Worker for authorized HTTP requests, HTML inspection, player/source inspection, JavaScript asset analysis, and media proxying. Browser JavaScript is inspected statically; it is not executed by the Worker.</p></header>
+
+  <section class="grid">
+    <article class="card"><h2>Fetch</h2><p>Fetch a public HTTP(S) resource and return its response through the Worker.</p><div class="path"><span class="method">GET</span>/fetch?url=&lt;url&gt;</div></article>
+    <article class="card"><h2>Proxy</h2><p>Stream a resource through the Worker. Useful for media/CDN testing and range requests.</p><div class="path"><span class="method">GET</span>/proxy?url=&lt;url&gt;&amp;referer=&lt;url&gt;&amp;origin=&lt;url&gt;</div></article>
+    <article class="card"><h2>Inspect HTML</h2><p>Extract scripts, iframes, links, API candidates, media candidates and linked JavaScript clues.</p><div class="path"><span class="method">GET</span>/inspect?url=&lt;html-url&gt;</div></article>
+    <article class="card"><h2>Inspect Player</h2><p>Inspect an embedded player page and linked player scripts without executing them.</p><div class="path"><span class="method">GET</span>/inspect-player?url=&lt;player-url&gt;</div></article>
+    <article class="card"><h2>Inline JavaScript</h2><p>Extract inline script blocks and return useful matches such as fetch, XHR, session and source references.</p><div class="path"><span class="method">GET</span>/extract-inline-js?url=&lt;html-url&gt;</div></article>
+    <article class="card"><h2>Inspect Script</h2><p>Fetch a JavaScript asset and identify API, stream, session and media references.</p><div class="path"><span class="method">GET</span>/inspect-script?url=&lt;js-url&gt;</div></article>
+    <article class="card"><h2>Extract Links</h2><p>Return scripts, iframes, hrefs, links and inline-script summaries from an HTML page.</p><div class="path"><span class="method">GET</span>/extract-links?url=&lt;html-url&gt;</div></article>
+    <article class="card"><h2>Health</h2><p>Simple deployment/version check.</p><div class="path"><span class="method">GET</span>/health</div></article>
   </section>
 
-  <section id="watch" class="watch hidden">
-    <span class="back" id="back">← Back to search</span>
-    <div class="watchhead"><div><div id="watchTitle" class="watchtitle"></div><div id="watchMeta" class="muted"></div></div></div>
-    <div class="player"><iframe id="frame" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer"></iframe></div>
-    <div id="serverStatus" class="status">Resolving Anikoto...</div>
-    <div id="servers" class="servers"></div>
-    <div id="episodes" class="episodes"></div>
-    <div class="notice">The resolver uses AniList metadata to find the matching Anikoto slug. Episode numbers are then appended to that slug. Provider/source URLs are only shown when the worker can legitimately discover them from the episode response.</div>
-  </section>
+  <section class="section"><h2>Request headers</h2><table class="table"><thead><tr><th>Parameter</th><th>Purpose</th></tr></thead><tbody><tr><td>referer</td><td>Sets the upstream Referer header.</td></tr><tr><td>origin</td><td>Sets the upstream Origin header.</td></tr><tr><td>header_*</td><td>Passes a specific additional header, e.g. <code>header_Accept=application/json</code>.</td></tr><tr><td>Range</td><td>Forwarded from the incoming request for media/range testing.</td></tr></tbody></table></section>
+
+  <section class="section"><h2>Examples</h2><div class="code"># Inspect a player
+https://fetcher.ammhfoo.workers.dev/inspect-player?url=&lt;ENCODED_PLAYER_URL&gt;
+
+# Extract inline scripts
+https://fetcher.ammhfoo.workers.dev/extract-inline-js?url=&lt;ENCODED_HTML_URL&gt;
+
+# Inspect a JS asset
+https://fetcher.ammhfoo.workers.dev/inspect-script?url=&lt;ENCODED_JS_URL&gt;
+
+# Fetch with browser context headers
+https://fetcher.ammhfoo.workers.dev/fetch?url=&lt;URL&gt;&amp;referer=&lt;REFERER&gt;&amp;origin=&lt;ORIGIN&gt;</div></section>
+
+  <div class="notice">Use these routes only with resources you are authorized to access. The Worker blocks local targets and does not execute page JavaScript, bypass DRM/CAPTCHA, or defeat access controls. Runtime requests made by a real browser still need to be observed with a browser/network tool.</div>
+  <div class="foot">Fetcher · Cloudflare Worker · API docs</div>
 </div>
-<script>
-const WORKER="https://fetcher.ammhfoo.workers.dev";
-const ANILIST="https://graphql.anilist.co";
-const gql=`query($search:String){Page(perPage:24){media(search:$search,type:ANIME,sort:SEARCH_MATCH){id,idMal,format,episodes,seasonYear,title{romaji english native userPreferred},synonyms,coverImage{large},bannerImage}}}`;
-const $=s=>document.querySelector(s);
-const esc=s=>String(s??'');
-function metadata(a,episode=1){return {anilist:a.id,idMal:a.idMal,format:a.format,episodes:a.episodes,seasonYear:a.seasonYear,title:a.title,synonyms:a.synonyms||[],episode};}
-async function anilistSearch(q){const r=await fetch(ANILIST,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({query:gql,variables:{search:q}})});if(!r.ok)throw Error('AniList HTTP '+r.status);const j=await r.json();return j.data?.Page?.media||[]}
-function renderResults(items){const root=$('#results');root.innerHTML='';if(!items.length){root.innerHTML='<div class="empty">No results found.</div>';return}for(const a of items){const c=document.createElement('article');c.className='card';c.innerHTML=`<img class="poster" src="${esc(a.coverImage?.large||'')}" loading="lazy"><div class="pad"><div class="title">${esc(a.title?.userPreferred||a.title?.english||a.title?.romaji||'Unknown')}</div><div class="muted">${esc(a.seasonYear||'')} · ${esc(a.format||'')} · ${esc(a.episodes||'?')} eps</div></div>`;c.onclick=()=>openWatch(a,1);root.appendChild(c)}}
-async function resolve(a,episode){const m=metadata(a,episode);const u=new URL(WORKER+'/resolve');for(const [k,v] of Object.entries({anilist:m.anilist,idMal:m.idMal,format:m.format,episodes:m.episodes,seasonYear:m.seasonYear,english:m.title?.english,romaji:m.title?.romaji,native:m.title?.native,userPreferred:m.title?.userPreferred,synonyms:m.synonyms.join(','),episode})){if(v!==null&&v!==undefined&&v!=='')u.searchParams.set(k,v)}const r=await fetch(u);return await r.json()}
-async function inspectEpisode(url){const r=await fetch(WORKER+'/inspect?url='+encodeURIComponent(url));return await r.json()}
-async function openWatch(a,episode){location.hash='watch='+a.id+'&ep='+episode;$('#home').classList.add('hidden');$('#watch').classList.remove('hidden');$('#watchTitle').textContent=a.title?.userPreferred||a.title?.english||a.title?.romaji||'Anime';$('#watchMeta').textContent=`${a.seasonYear||''} · ${a.format||''} · ${a.episodes||'?'} episodes`;$('#servers').innerHTML='';$('#episodes').innerHTML='';$('#frame').src='about:blank';$('#serverStatus').textContent='Resolving Anikoto slug...';
-const total=Math.min(Number(a.episodes)||1,200);for(let i=1;i<=total;i++){const b=document.createElement('button');b.className='ep'+(i===episode?' active':'');b.textContent=i;b.onclick=()=>openWatch(a,i);$('#episodes').appendChild(b)}
-try{const data=await resolve(a,episode);if(!data.match){$('#serverStatus').textContent=data.reason||'No high-confidence Anikoto match.';return}const ep=data.match.episodeUrl;$('#serverStatus').textContent=`Matched: ${data.match.slug}`;addServer('Anikoto',ep,true);const inspected=await inspectEpisode(ep);const urls=[...(inspected.iframes||[]),...(inspected.mediaEndpoints||[])];for(const u of urls)if(u!==ep)addServer('Source',u,false)}catch(e){$('#serverStatus').textContent='Resolver error: '+e.message}}
-function addServer(name,url,primary){const b=document.createElement('button');b.className='server'+(primary?'':' alt');b.textContent=name;b.onclick=()=>{$('#frame').src=url};$('#servers').appendChild(b);if(primary)$('#frame').src=url}
-$('#searchForm').onsubmit=async e=>{e.preventDefault();const q=$('#q').value.trim();if(!q)return;$('#status').textContent='Searching AniList...';$('#results').innerHTML='';try{renderResults(await anilistSearch(q));$('#status').textContent='AniList results'}catch(err){$('#status').textContent=err.message}};
-$('#back').onclick=()=>{location.hash='';$('#watch').classList.add('hidden');$('#home').classList.remove('hidden')};
-window.onhashchange=()=>{if(!location.hash){$('#watch').classList.add('hidden');$('#home').classList.remove('hidden')}};
-</script>
 </body>
 </html>
