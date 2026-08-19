@@ -4,6 +4,9 @@ const ANIKOTO_URL = "https://anikototv.to";
 const CRICKLY_JTV_HOST = "jtv.crickly.workers.dev";
 const CRICKLY_JTV_PAGE = "https://cricklyjtv.pages.dev/";
 const CRICKLY_JTV_ORIGIN = "https://cricklyjtv.pages.dev";
+const PREMIUMPLUGX_HOST = "premiumplugx.me";
+const PREMIUMPLUGX_PAGE = "https://premiumplugx.me/";
+const PREMIUMPLUGX_ORIGIN = "https://premiumplugx.me";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -125,6 +128,10 @@ function applyCricklyContext(target:URL,headers:Headers){
     if(!headers.has("Referer"))headers.set("Referer",CRICKLY_JTV_PAGE);
     if(!headers.has("Origin"))headers.set("Origin",CRICKLY_JTV_ORIGIN);
     headers.set("Accept","application/json,text/plain,*/*");
+  }
+  if(target.hostname.toLowerCase()===PREMIUMPLUGX_HOST){
+    if(!headers.has("Referer"))headers.set("Referer",PREMIUMPLUGX_PAGE);
+    if(!headers.has("Origin"))headers.set("Origin",PREMIUMPLUGX_ORIGIN);
   }
   return headers;
 }
